@@ -1,0 +1,19 @@
+{
+  "name": "brutmd",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "glob": "^13.0.6",
+    "gray-matter": "^4.0.3",
+    "markdown-it": "^14.1.1"
+  }
+}
