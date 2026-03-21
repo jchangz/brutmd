@@ -3,17 +3,18 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "node build.js",
+    "dev": "node dev.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "chokidar": "^5.0.0",
     "glob": "^13.0.6",
     "gray-matter": "^4.0.3",
-    "markdown-it": "^14.1.1"
+    "markdown-it": "^14.1.1",
+    "ws": "^8.19.0"
   }
 }
