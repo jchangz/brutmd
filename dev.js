@@ -11,7 +11,7 @@ const WS_PORT = 3001
 
 const md = new MarkdownIt({ html: true })
 
-// ── Build helpers (inlined so we don't need module cache tricks) ──────────────
+// ── Build helpers ─────────────────────────────────────────────────────────────
 
 function buildNav(files) {
   return files
@@ -81,15 +81,19 @@ function reload() {
 
 // ── File watcher ──────────────────────────────────────────────────────────────
 
-// ── File watcher ──────────────────────────────────────────────────────────────
-
 let rebuilding = false
 
 fs.watch('docs', { recursive: true }, async (event, filename) => {
   if (!filename?.endsWith('.md')) return
   if (rebuilding) return
   rebuilding = true
-  console.log(`${event}: ${filename} — rebuilding...`)
+
+  // 'rename' fires for new files and deletions, 'change' fires for edits
+  const fullPath = path.join('docs', filename)
+  const exists = fs.existsSync(fullPath)
+  const action = event === 'rename' ? (exists ? 'created' : 'deleted') : 'changed'
+  console.log(`${action}: ${filename} — rebuilding...`)
+
   try {
     await buildAll()
     console.log(`Rebuilt — sending reload to ${wss.clients.size} client(s)`)
@@ -101,8 +105,8 @@ fs.watch('docs', { recursive: true }, async (event, filename) => {
   }
 })
 
-fs.watch('style.css', async (event) => {
-  console.log(`${event}: style.css — rebuilding...`)
+fs.watch('style.css', async () => {
+  console.log('changed: style.css — rebuilding...')
   await buildAll()
   reload()
 })
