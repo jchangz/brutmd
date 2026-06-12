@@ -11,20 +11,69 @@ const WS_PORT = 3001
 
 const md = new MarkdownIt({ html: true })
 
-// ── Build helpers ─────────────────────────────────────────────────────────────
+// ── Sidebar ───────────────────────────────────────────────────────────────────
 
-function buildNav(files) {
-  return files
-    .map(file => {
-      const raw = fs.readFileSync(file, 'utf-8')
-      const { data } = matter(raw)
-      const href = '/' + file.replace('docs/', '').replace('.md', '.html')
-      return `<a href="${href}">${data.title || path.basename(file, '.md')}</a>`
-    })
-    .join('\n')
+function getTitle(file) {
+  const raw = fs.readFileSync(file, 'utf-8')
+  const { data } = matter(raw)
+  return data.title || path.basename(file, '.md')
 }
 
-function applyLayout(html, frontmatter, nav) {
+function buildSidebar(files, currentFile) {
+  const tree = {}
+
+  for (const file of files) {
+    const rel = file.replace('docs/', '')
+    const parts = rel.split('/')
+
+    if (parts.length === 1) {
+      tree['_root'] = tree['_root'] || []
+      tree['_root'].push(file)
+    } else {
+      const folder = parts[0]
+      tree[folder] = tree[folder] || []
+      tree[folder].push(file)
+    }
+  }
+
+  let html = '<nav class="sidebar"><ul class="sidebar-list">'
+
+  if (tree['_root']) {
+    for (const file of tree['_root']) {
+      const href = '/' + file.replace('docs/', '').replace('.md', '.html')
+      const title = getTitle(file)
+      const active = file === currentFile ? ' class="active"' : ''
+      html += `<li><a href="${href}"${active}>${title}</a></li>`
+    }
+  }
+
+  for (const [folder, folderFiles] of Object.entries(tree)) {
+    if (folder === '_root') continue
+
+    const label = folder.charAt(0).toUpperCase() + folder.slice(1)
+    const isActive = folderFiles.some(f => f === currentFile)
+
+    html += `<li class="sidebar-group${isActive ? ' open' : ''}">`
+    html += `<span class="sidebar-group-label">${label}</span>`
+    html += '<ul class="sidebar-sublist">'
+
+    for (const file of folderFiles) {
+      const href = '/' + file.replace('docs/', '').replace('.md', '.html')
+      const title = getTitle(file)
+      const active = file === currentFile ? ' class="active"' : ''
+      html += `<li><a href="${href}"${active}>${title}</a></li>`
+    }
+
+    html += '</ul></li>'
+  }
+
+  html += '</ul></nav>'
+  return html
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────────
+
+function applyLayout(html, frontmatter, sidebar) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -34,14 +83,16 @@ function applyLayout(html, frontmatter, nav) {
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <nav class="site-nav">
+  <header class="site-header">
     <a class="site-title" href="/index.html">📄 My Site</a>
-    <div class="nav-links">${nav}</div>
-  </nav>
-  <main class="content">
-    ${frontmatter.title ? `<h1>${frontmatter.title}</h1>` : ''}
-    ${html}
-  </main>
+  </header>
+  <div class="layout">
+    ${sidebar}
+    <main class="content">
+      ${frontmatter.title ? `<h1>${frontmatter.title}</h1>` : ''}
+      ${html}
+    </main>
+  </div>
   <script>
     const ws = new WebSocket('ws://localhost:${WS_PORT}');
     ws.onmessage = () => location.reload();
@@ -51,21 +102,23 @@ function applyLayout(html, frontmatter, nav) {
 </html>`
 }
 
-function buildPage(file, nav) {
+// ── Build ─────────────────────────────────────────────────────────────────────
+
+function buildPage(file, files) {
   const raw = fs.readFileSync(file, 'utf-8')
   const { data, content } = matter(raw)
   const html = md.render(content)
+  const sidebar = buildSidebar(files, file)
   const outPath = ('dist/' + file.replace('docs/', '')).replace('.md', '.html')
   fs.mkdirSync(path.dirname(outPath), { recursive: true })
-  fs.writeFileSync(outPath, applyLayout(html, data, nav))
+  fs.writeFileSync(outPath, applyLayout(html, data, sidebar))
 }
 
 async function buildAll() {
   const files = await glob('docs/**/*.md')
   fs.mkdirSync('dist', { recursive: true })
   fs.copyFileSync('style.css', 'dist/style.css')
-  const nav = buildNav(files)
-  for (const file of files) buildPage(file, nav)
+  for (const file of files) buildPage(file, files)
   console.log(`Built ${files.length} page(s)`)
 }
 
@@ -88,7 +141,6 @@ fs.watch('docs', { recursive: true }, async (event, filename) => {
   if (rebuilding) return
   rebuilding = true
 
-  // 'rename' fires for new files and deletions, 'change' fires for edits
   const fullPath = path.join('docs', filename)
   const exists = fs.existsSync(fullPath)
   const action = event === 'rename' ? (exists ? 'created' : 'deleted') : 'changed'
