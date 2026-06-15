@@ -7,8 +7,6 @@ import MarkdownIt from 'markdown-it'
 import matter from 'gray-matter'
 
 const PORT = 3000
-const WS_PORT = 3001
-
 const md = new MarkdownIt({ html: true })
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -73,7 +71,7 @@ function buildSidebar(files, currentFile) {
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 
-function applyLayout(html, frontmatter, sidebar) {
+function applyLayout(html, frontmatter, sidebar, wsPort) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -94,7 +92,7 @@ function applyLayout(html, frontmatter, sidebar) {
     </main>
   </div>
   <script>
-    const ws = new WebSocket('ws://localhost:${WS_PORT}');
+    const ws = new WebSocket('ws://localhost:${wsPort}');
     ws.onmessage = () => location.reload();
     ws.onclose = () => console.log('[dev] websocket closed');
   </script>
@@ -104,64 +102,23 @@ function applyLayout(html, frontmatter, sidebar) {
 
 // ── Build ─────────────────────────────────────────────────────────────────────
 
-function buildPage(file, files) {
+function buildPage(file, files, wsPort) {
   const raw = fs.readFileSync(file, 'utf-8')
   const { data, content } = matter(raw)
   const html = md.render(content)
   const sidebar = buildSidebar(files, file)
   const outPath = ('dist/' + file.replace('docs/', '')).replace('.md', '.html')
   fs.mkdirSync(path.dirname(outPath), { recursive: true })
-  fs.writeFileSync(outPath, applyLayout(html, data, sidebar))
+  fs.writeFileSync(outPath, applyLayout(html, data, sidebar, wsPort))
 }
 
-async function buildAll() {
+async function buildAll(wsPort) {
   const files = await glob('docs/**/*.md')
   fs.mkdirSync('dist', { recursive: true })
   fs.copyFileSync('style.css', 'dist/style.css')
-  for (const file of files) buildPage(file, files)
+  for (const file of files) buildPage(file, files, wsPort)
   console.log(`Built ${files.length} page(s)`)
 }
-
-// ── WebSocket server ──────────────────────────────────────────────────────────
-
-const wss = new WebSocketServer({ port: WS_PORT })
-
-function reload() {
-  wss.clients.forEach(client => {
-    if (client.readyState === 1) client.send('reload')
-  })
-}
-
-// ── File watcher ──────────────────────────────────────────────────────────────
-
-let rebuilding = false
-
-fs.watch('docs', { recursive: true }, async (event, filename) => {
-  if (!filename?.endsWith('.md')) return
-  if (rebuilding) return
-  rebuilding = true
-
-  const fullPath = path.join('docs', filename)
-  const exists = fs.existsSync(fullPath)
-  const action = event === 'rename' ? (exists ? 'created' : 'deleted') : 'changed'
-  console.log(`${action}: ${filename} — rebuilding...`)
-
-  try {
-    await buildAll()
-    console.log(`Rebuilt — sending reload to ${wss.clients.size} client(s)`)
-    reload()
-  } catch (err) {
-    console.error('Build error:', err)
-  } finally {
-    setTimeout(() => { rebuilding = false }, 500)
-  }
-})
-
-fs.watch('style.css', async () => {
-  console.log('changed: style.css — rebuilding...')
-  await buildAll()
-  reload()
-})
 
 // ── Static file server ────────────────────────────────────────────────────────
 
@@ -174,7 +131,7 @@ const MIME = {
   '.svg':  'image/svg+xml',
 }
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   let urlPath = req.url === '/' ? '/index.html' : req.url
   urlPath = urlPath.split('?')[0]
   let filePath = path.join('dist', urlPath)
@@ -190,13 +147,67 @@ const server = http.createServer((req, res) => {
   const content = fs.readFileSync(filePath)
   res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' })
   res.end(content)
-})
+}
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
-await buildAll()
+function listen(port) {
+  const server = http.createServer(handleRequest)
 
-server.listen(PORT, () => {
-  console.log(`\n🚀 Dev server running at http://localhost:${PORT}`)
-  console.log('   Watching docs/**/*.md and style.css for changes...\n')
-})
+  server.listen(port)
+    .on('listening', async () => {
+      const actualPort = server.address().port
+      const wsPort = actualPort + 1
+
+      const wss = new WebSocketServer({ port: wsPort })
+
+      function reload() {
+        wss.clients.forEach(client => {
+          if (client.readyState === 1) client.send('reload')
+        })
+      }
+
+      await buildAll(wsPort)
+
+      let rebuilding = false
+
+      fs.watch('docs', { recursive: true }, async (event, filename) => {
+        if (!filename?.endsWith('.md')) return
+        if (rebuilding) return
+        rebuilding = true
+        const fullPath = path.join('docs', filename)
+        const exists = fs.existsSync(fullPath)
+        const action = event === 'rename' ? (exists ? 'created' : 'deleted') : 'changed'
+        console.log(`${action}: ${filename} — rebuilding...`)
+        try {
+          await buildAll(wsPort)
+          console.log(`Rebuilt — sending reload to ${wss.clients.size} client(s)`)
+          reload()
+        } catch (err) {
+          console.error('Build error:', err)
+        } finally {
+          setTimeout(() => { rebuilding = false }, 500)
+        }
+      })
+
+      fs.watch('style.css', async () => {
+        console.log('changed: style.css — rebuilding...')
+        await buildAll(wsPort)
+        reload()
+      })
+
+      console.log(`\n🚀 Dev server running at http://localhost:${actualPort}`)
+      console.log(`   WebSocket on port ${wsPort}`)
+      console.log('   Watching docs/**/*.md and style.css for changes...\n')
+    })
+    .on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`Port ${port} in use, trying ${port + 1}...`)
+        server.close(() => listen(port + 1))
+      } else {
+        throw err
+      }
+    })
+}
+
+listen(PORT)
