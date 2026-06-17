@@ -179,6 +179,19 @@ function listen(port) {
         const exists = fs.existsSync(fullPath)
         const action = event === 'rename' ? (exists ? 'created' : 'deleted') : 'changed'
         console.log(`${action}: ${filename} — rebuilding...`)
+
+        // Prepopulate new empty files with frontmatter
+        if (action === 'created') {
+          const fileContent = fs.readFileSync(fullPath, 'utf-8')
+          if (fileContent.trim() === '') {
+            const title = path.basename(filename, '.md')
+              .replace(/-/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase())
+            fs.writeFileSync(fullPath, `---\ntitle: ${title}\n---\n\n`)
+            console.log(`Prepopulated: ${filename} with title "${title}"`)
+          }
+        }
+
         try {
           await buildAll(wsPort)
           console.log(`Rebuilt — sending reload to ${wss.clients.size} client(s)`)
