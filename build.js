@@ -113,6 +113,9 @@ export function buildPage(file, files) {
 function copyStyles() {
   fs.mkdirSync('dist', { recursive: true })
   fs.copyFileSync('style.css', 'dist/style.css')
+  if (fs.existsSync('public')) {
+    fs.cpSync('public', 'dist', { recursive: true })
+  }
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────

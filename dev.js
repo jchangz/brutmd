@@ -116,6 +116,9 @@ async function buildAll(wsPort) {
   const files = await glob('docs/**/*.md')
   fs.mkdirSync('dist', { recursive: true })
   fs.copyFileSync('style.css', 'dist/style.css')
+  if (fs.existsSync('public')) {
+    fs.cpSync('public', 'dist', { recursive: true })
+  }
   for (const file of files) buildPage(file, files, wsPort)
   console.log(`Built ${files.length} page(s)`)
 }
